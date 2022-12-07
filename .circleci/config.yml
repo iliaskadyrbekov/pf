@@ -1,0 +1,92 @@
+# Use the latest 2.1 version of CircleCI pipeline process engine. See: https://circleci.com/docs/2.0/configuration-reference
+version: 2.1
+# Use a package of configuration called an orb.
+orbs:
+  aws-ecr: circleci/aws-ecr@6.15.1
+  aws-ecs: circleci/aws-ecs@2.0.0
+  aws-cli: circleci/aws-cli@2.1.0
+
+jobs:
+  build:
+    machine: true
+    steps:
+      - aws-ecr/build-and-push-image:
+          account-url: AWS_ECR_REPOSITORY_URL
+          region: AWS_DEFAULT_REGION
+          repo: '${AWS_RESOURCE_NAME_PREFIX}'
+          tag: '${CIRCLE_SHA1}'
+          extra-build-args: '--build-arg PORT=$PORT'
+  deploy:
+    docker:
+      - image: 'cimg/python:3.9.1'
+    steps:
+      - aws-cli/setup:
+          aws-access-key-id: AWS_SECRET_ACCESS_KEY
+          aws-region: AWS_DEFAULT_REGION
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+      - aws-ecs/update-service:
+          container-env-var-updates: >
+            container=${AWS_RESOURCE_NAME_PREFIX}-service,name="GRAPHQL_ENDPOINT",value="${GRAPHQL_ENDPOINT}",
+            container=${AWS_RESOURCE_NAME_PREFIX}-service,name="CLOUD_FRONT_URL",value="${CLOUD_FRONT_URL}",
+            container=${AWS_RESOURCE_NAME_PREFIX}-service,name="GOOGLE_MAPS_API_KEY",value="${GOOGLE_MAPS_API_KEY}",
+            container=${AWS_RESOURCE_NAME_PREFIX}-service,name="INTERCOM_SECRET",value="${INTERCOM_SECRET}",
+          family: '${AWS_RESOURCE_NAME_PREFIX}-service'
+          cluster-name: '${AWS_ECS_CLUSTER_NAME_PREFIX}-cluster'
+          container-image-name-updates: 'container=${AWS_RESOURCE_NAME_PREFIX}-service,image-and-tag=${AWS_ECR_REPOSITORY_URL}/${AWS_RESOURCE_NAME_PREFIX}:${CIRCLE_SHA1}'
+          verify-revision-is-deployed: true
+      - run:
+          name: Test deployment (Please manually tear down AWS resources after use, if desired)
+          command: |
+            curl -s -o --retry 10 /dev/null -w '%{http_code}' ${DEPLOYMENT_TEST_URL} | grep 200
+
+workflows:
+  build_and_deploy:
+    jobs:
+      - build:
+          name: 'build-prod'
+          context:
+            - aws-payfaction-prod
+            - aws-admin-prod
+            - admin-prod-env-variables
+          filters:
+            branches:
+              only:
+                - master
+      - deploy:
+          name: 'deploy-prod'
+          requires:
+            - build-prod
+          context:
+            - aws-payfaction-prod
+            - aws-admin-prod
+            - admin-prod-env-variables
+          filters:
+            branches:
+              only:
+                - master
+
+      - build:
+          name: 'build-dev'
+          context:
+            - aws-payfaction-dev
+            - aws-admin-dev
+            - admin-dev-env-variables
+          filters:
+            branches:
+              only:
+                - dev
+      - deploy:
+          name: 'deploy-dev'
+          requires:
+            - build-dev
+          context:
+            - aws-payfaction-dev
+            - aws-admin-dev
+            - admin-dev-env-variables
+          filters:
+            branches:
+              only:
+                - dev
+
+
+

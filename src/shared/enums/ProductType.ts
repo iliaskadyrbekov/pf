@@ -1,0 +1,6 @@
+export enum ProductType {
+  TICKET = 'TICKET',
+  RENTAL = 'RENTAL',
+  GIFT_CARD = 'GIFT_CARD',
+  ACCOMMODATION = 'ACCOMMODATION',
+}
